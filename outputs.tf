@@ -1,11 +1,9 @@
-output "proxy_internal_ip" {
-  value = google_compute_instance.proxy.network_interface.0.network_ip
-}
-
-output "proxy_external_ip" {
-  value = google_compute_instance.proxy.network_interface.0.access_config.0.nat_ip
-}
-
 output "runner_internal_ip" {
-  value = google_compute_instance.runner.network_interface.0.network_ip
+  description = "Internal IP address of the GitHub Actions runner"
+  value       = google_compute_instance.runner.network_interface[0].network_ip
+}
+
+output "nat_gateway_name" {
+  description = "Name of the Cloud NAT gateway"
+  value       = google_compute_router_nat.runner_nat.name
 }

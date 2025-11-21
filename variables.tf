@@ -1,57 +1,51 @@
 variable "project_id" {
-  description = "ID del proyecto de GCP"
+  description = "The GCP project id in which resources will be created"
   type        = string
 }
 
 variable "region" {
-  description = "Región de GCP"
+  description = "The region in which to create networking resources"
   type        = string
-  default     = "europe-west1"
+  default     = "us-central1"
 }
 
 variable "zone" {
-  description = "Zona de GCP"
+  description = "The zone for the runner VM"
   type        = string
-  default     = "europe-west1-b"
+  default     = "us-central1-a"
 }
 
-variable "vpc_cidr" {
-  description = "CIDR de la subnet"
+variable "network_cidr" {
+  description = "CIDR block for the private subnet"
   type        = string
-  default     = "10.10.0.0/24"
+  default     = "10.0.0.0/24"
 }
 
-variable "runner_machine_type" {
-  description = "Tipo de máquina para el runner"
+variable "machine_type" {
+  description = "Machine type for the runner VM"
   type        = string
   default     = "e2-medium"
 }
 
-variable "proxy_machine_type" {
-  description = "Tipo de máquina para el proxy"
-  type        = string
-  default     = "e2-small"
-}
-
 variable "github_repo_url" {
-  description = "URL del org o repo GitHub donde registrar el runner"
+  description = "URL of the GitHub organisation or repository where the runner will register"
   type        = string
 }
 
-variable "github_registration_token" {
-  description = "Registration token (expira rápido)"
+variable "github_token" {
+  description = "GitHub registration token used to register the self‑hosted runner"
   type        = string
   sensitive   = true
 }
 
 variable "runner_labels" {
-  description = "Etiquetas del runner"
+  description = "Comma‑separated labels to assign to the GitHub runner"
   type        = string
-  default     = "gcp,self-hosted,ubuntu"
+  default     = "self‑hosted,gcp"
 }
 
 variable "runner_version" {
-  description = "Versión del runner"
+  description = "Version of the GitHub Actions runner to install"
   type        = string
   default     = "2.329.0"
 }

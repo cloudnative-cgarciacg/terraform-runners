@@ -98,35 +98,13 @@ resource "google_compute_instance" "runner" {
     ]
   }
 
-    metadata_startup_script = <<-EOT
-    #!/bin/bash
+  metadata_startup_script = templatefile("${path.module}/startup.sh.tpl", {
+  github_url     = var.github_url
+  github_token   = var.github_token
+  runner_version = var.runner_version
+  runner_labels  = var.runner_labels
+  })
 
-    RUNNER_VERSION="${var.runner_version}"
-    GITHUB_URL="${var.github_url}"
-    REG_TOKEN="${var.github_token}"
-    RUNNER_LABELS="${var.runner_labels}"
-
-    apt-get update -y
-    apt-get install -y curl tar ca-certificates
-
-    mkdir -p /opt/actions-runner
-    cd /opt/actions-runner
-
-    curl -Ls -o actions-runner.tar.gz \
-    "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
-
-    tar xzf actions-runner.tar.gz
-
-    ./config.sh --unattended \
-    --url "${GITHUB_URL}" \
-    --token "${REG_TOKEN}" \
-    --labels "${RUNNER_LABELS}" \
-    --name "gcp-$(hostname)" \
-    --work "_work"
-
-    ./svc.sh install
-    ./svc.sh start
-    EOT
 
 }
 

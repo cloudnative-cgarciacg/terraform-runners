@@ -98,43 +98,36 @@ resource "google_compute_instance" "runner" {
     ]
   }
 
-  metadata_startup_script = <<-EOT
+    metadata_startup_script = <<-EOT
     #!/bin/bash
-    set -euxo pipefail
-
-    # Log del startup para debug
-    exec > /var/log/github-runner-startup.log 2>&1
 
     RUNNER_VERSION="${var.runner_version}"
     GITHUB_URL="${var.github_url}"
     REG_TOKEN="${var.github_token}"
     RUNNER_LABELS="${var.runner_labels}"
 
-    # 1. Instalar dependencias
     apt-get update -y
     apt-get install -y curl tar ca-certificates
 
-    # 2. Descargar el runner en /opt/actions-runner
     mkdir -p /opt/actions-runner
     cd /opt/actions-runner
 
     curl -Ls -o actions-runner.tar.gz \
-      "https://github.com/actions/runner/releases/download/v${var.runner_version}/actions-runner-linux-x64-${var.runner_version}.tar.gz"
+    "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
 
     tar xzf actions-runner.tar.gz
 
-    # 3. Configurar el runner en modo no interactivo
     ./config.sh --unattended \
-      --url "\${GITHUB_URL}" \
-      --token "\${REG_TOKEN}" \
-      --labels "\${RUNNER_LABELS}" \
-      --name "gcp-$(hostname)" \
-      --work "_work"
+    --url "${GITHUB_URL}" \
+    --token "${REG_TOKEN}" \
+    --labels "${RUNNER_LABELS}" \
+    --name "gcp-$(hostname)" \
+    --work "_work"
 
-    # 4. Instalar y arrancar el servicio
     ./svc.sh install
     ./svc.sh start
-  EOT
+    EOT
+
 }
 
 # -----------------------------

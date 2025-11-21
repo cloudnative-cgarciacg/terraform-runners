@@ -61,21 +61,8 @@ resource "google_compute_router_nat" "runner_nat" {
 # Firewall rule allowing outbound HTTPS only for the runner.  The runner
 # instances are tagged with "github-runner" so that the rule applies only
 # to them.  Outbound traffic on TCP port 443 is permitted to any destination.
-resource "google_compute_firewall" "runner_https_egress" {
-  name      = "github-runner-egress-https"
-  network   = google_compute_network.runner_vpc.id
-  direction = "EGRESS"
-  priority  = 1000
-
-  allow {
-    protocol = "tcp"
-    ports    = ["443"]
-  }
-
-  destination_ranges = ["0.0.0.0/0"]
-  target_tags        = ["github-runner"]
-  description        = "Allow runner to egress only on TCP port 443"
-}
+# Removed: runner_https_egress rule.  Egress control is now enforced via
+# runner_to_proxy and proxy firewall rules.
 
 # Catch‑all deny rule to prevent any other outbound traffic from the runner.
 resource "google_compute_firewall" "runner_deny_egress" {
@@ -91,6 +78,62 @@ resource "google_compute_firewall" "runner_deny_egress" {
   destination_ranges = ["0.0.0.0/0"]
   target_tags        = ["github-runner"]
   description        = "Deny all other egress traffic from the runner"
+}
+
+# Allow the runner to connect only to the proxy on port 3128.  This rule
+# ensures that all outbound traffic from the runner goes through Squid where
+# domain filtering is enforced.
+resource "google_compute_firewall" "runner_to_proxy" {
+  name      = "github-runner-to-proxy"
+  network   = google_compute_network.runner_vpc.id
+  direction = "EGRESS"
+  priority  = 1000
+
+  allow {
+    protocol = "tcp"
+    ports    = ["3128"]
+  }
+
+  destination_ranges = [google_compute_instance.proxy.network_interface[0].network_ip]
+  target_tags        = ["github-runner"]
+  description        = "Allow runner to send traffic to the proxy on port 3128"
+}
+
+# Permit the proxy to receive traffic from the runner on port 3128.
+resource "google_compute_firewall" "proxy_ingress_from_runner" {
+  name      = "github-proxy-ingress-from-runner"
+  network   = google_compute_network.runner_vpc.id
+  direction = "INGRESS"
+  priority  = 1000
+
+  allow {
+    protocol = "tcp"
+    ports    = ["3128"]
+  }
+
+  source_tags = ["github-runner"]
+  target_tags = ["github-proxy"]
+  description = "Allow proxy to accept connections from runners on port 3128"
+}
+
+# Allow the proxy to access the internet over HTTP/HTTPS.  The proxy uses
+# these ports to download packages and forward runner traffic.  You may
+# tighten the ports list (for example, to only 443) once package installation
+# is no longer needed.
+resource "google_compute_firewall" "proxy_egress" {
+  name      = "github-proxy-egress"
+  network   = google_compute_network.runner_vpc.id
+  direction = "EGRESS"
+  priority  = 1000
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80", "443"]
+  }
+
+  destination_ranges = ["0.0.0.0/0"]
+  target_tags        = ["github-proxy"]
+  description        = "Allow proxy outbound HTTP and HTTPS"
 }
 
 # Optional firewall rule to allow SSH access to the runner via IAP.  This rule
@@ -123,6 +166,13 @@ resource "google_compute_firewall" "iap_ssh" {
 resource "google_service_account" "runner_sa" {
   account_id   = "github-runner-sa"
   display_name = "Service account for GitHub Actions runner"
+}
+
+# Service account for the proxy VM.  The proxy forwards outbound requests on
+# behalf of the runner and does not need broad permissions.
+resource "google_service_account" "proxy_sa" {
+  account_id   = "github-proxy-sa"
+  display_name = "Service account for Squid proxy"
 }
 
 # -----------------------------------------------------------------------------
@@ -171,19 +221,27 @@ resource "google_compute_instance" "runner" {
 #!/bin/bash
 set -euxo pipefail
 
-# This script installs and registers the GitHub Actions runner.  The base
-# Ubuntu 22.04 image includes curl and tar.  If they are missing you may
-# need to preinstall them in a custom image or allow outbound HTTP
-# temporarily for apt-get install.
+## This script installs and registers the GitHub Actions runner.  The base
+## Ubuntu 22.04 image includes curl and tar.  If they are missing you may
+## need to preinstall them in a custom image or allow outbound HTTP
+## temporarily for apt-get install.
+
+# Configure proxy environment variables so all outbound traffic uses the
+# Squid proxy.  This ensures that traffic is filtered to the allowed GitHub
+# domains.  NO_PROXY excludes metadata endpoints.
+PROXY_IP="${google_compute_instance.proxy.network_interface[0].network_ip}"
+PROXY_PORT="3128"
+echo "HTTP_PROXY=http://$${PROXY_IP}:$${PROXY_PORT}" >> /etc/environment
+echo "HTTPS_PROXY=http://$${PROXY_IP}:$${PROXY_PORT}" >> /etc/environment
+echo "NO_PROXY=169.254.169.254,metadata.google.internal,localhost,127.0.0.1" >> /etc/environment
+export HTTP_PROXY="http://$${PROXY_IP}:$${PROXY_PORT}"
+export HTTPS_PROXY="http://$${PROXY_IP}:$${PROXY_PORT}"
+export NO_PROXY="169.254.169.254,metadata.google.internal,localhost,127.0.0.1"
 
 mkdir -p /opt/actions-runner
 cd /opt/actions-runner
 
-# Download and unpack the runner using version from Terraform variables.  We
-# deliberately expand ${var.runner_version} here so Terraform performs the
-# interpolation at apply time.  Note the use of double dollar signs ($$) to
-# escape shell variables (e.g. HOSTNAME) and avoid Terraform interpolation
-# inside the heredoc.
+# Download and unpack the runner using the version from Terraform variables.
 curl -Ls -o actions-runner-linux-x64-${var.runner_version}.tar.gz \
   https://github.com/actions/runner/releases/download/v${var.runner_version}/actions-runner-linux-x64-${var.runner_version}.tar.gz
 tar xzf actions-runner-linux-x64-${var.runner_version}.tar.gz
@@ -199,5 +257,75 @@ tar xzf actions-runner-linux-x64-${var.runner_version}.tar.gz
 # Install and start the runner as a system service
 ./svc.sh install
 ./svc.sh start
+EOF
+}
+
+# -----------------------------------------------------------------------------
+# Compute Instance for the Squid Proxy
+#
+# This VM has a public IP so it can forward traffic to the internet on behalf
+# of the runner.  Squid is configured to only allow traffic to a limited set of
+# GitHub domains over HTTPS.  Runner VMs send their traffic to the proxy via
+# port 3128.
+# -----------------------------------------------------------------------------
+
+resource "google_compute_instance" "proxy" {
+  name         = "github-proxy"
+  machine_type = "e2-small"
+  zone         = var.zone
+
+  tags = ["github-proxy"]
+
+  boot_disk {
+    initialize_params {
+      image = data.google_compute_image.ubuntu.self_link
+      size  = 20
+      type  = "pd-balanced"
+    }
+  }
+
+  network_interface {
+    subnetwork = google_compute_subnetwork.runner_subnet.id
+    # Assign a public IP so the proxy can reach the internet
+    access_config {}
+  }
+
+  service_account {
+    email  = google_service_account.proxy_sa.email
+    scopes = [
+      "https://www.googleapis.com/auth/logging.write",
+      "https://www.googleapis.com/auth/monitoring.write",
+    ]
+  }
+
+  metadata_startup_script = <<EOF
+#!/bin/bash
+set -eux
+
+apt-get update -y
+apt-get install -y squid
+
+cat >/etc/squid/squid.conf <<EOT
+http_port 3128
+
+acl localnet src ${var.network_cidr}
+
+# Allow only GitHub domains for runner traffic.  Wildcards (e.g., .github.com)
+# allow any subdomain.  Additional domains can be added as needed.
+acl github_domains dstdomain \
+    github.com \
+    .github.com \
+    .githubusercontent.com \
+    ghcr.io
+
+http_access allow localnet github_domains
+http_access deny all
+
+access_log stdio:/var/log/squid/access.log
+cache_log stdio:/var/log/squid/cache.log
+EOT
+
+systemctl restart squid
+systemctl enable squid
 EOF
 }

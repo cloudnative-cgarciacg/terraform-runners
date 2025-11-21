@@ -102,15 +102,19 @@ resource "google_compute_instance" "runner" {
     #!/bin/bash
     set -euxo pipefail
 
+    # Log del startup para debug
+    exec > /var/log/github-runner-startup.log 2>&1
+
     RUNNER_VERSION="${var.runner_version}"
     GITHUB_URL="${var.github_url}"
     REG_TOKEN="${var.github_token}"
     RUNNER_LABELS="${var.runner_labels}"
 
-    # Instalar dependencias
+    # 1. Instalar dependencias
     apt-get update -y
     apt-get install -y curl tar ca-certificates
 
+    # 2. Descargar el runner en /opt/actions-runner
     mkdir -p /opt/actions-runner
     cd /opt/actions-runner
 
@@ -119,13 +123,15 @@ resource "google_compute_instance" "runner" {
 
     tar xzf actions-runner.tar.gz
 
+    # 3. Configurar el runner en modo no interactivo
     ./config.sh --unattended \
-      --url "${var.github_url}" \
-      --token "${var.github_token}" \
-      --labels "${var.runner_labels}" \
+      --url "${GITHUB_URL}" \
+      --token "${REG_TOKEN}" \
+      --labels "${RUNNER_LABELS}" \
       --name "gcp-$(hostname)" \
       --work "_work"
 
+    # 4. Instalar y arrancar el servicio
     ./svc.sh install
     ./svc.sh start
   EOT

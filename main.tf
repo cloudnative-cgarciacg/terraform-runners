@@ -310,13 +310,31 @@ http_port 3128
 
 acl localnet src ${var.network_cidr}
 
-# Allow only GitHub domains for runner traffic.  Wildcards (e.g., .github.com)
-# allow any subdomain.  Additional domains can be added as needed.
+# Allow only the domains required by GitHub Actions self‑hosted runners.  Wildcards
+# (e.g., .github.com) allow any subdomain.  These domains are based on the
+# official GitHub documentation.  You can add more domains if your workflows
+# need additional services.
 acl github_domains dstdomain \
     github.com \
+    api.github.com \
+    codeload.github.com \
+    ghcr.io \
     .github.com \
     .githubusercontent.com \
-    ghcr.io
+    results-receiver.actions.githubusercontent.com \
+    .blob.core.windows.net \
+    objects.githubusercontent.com \
+    objects-origin.githubusercontent.com \
+    github-releases.githubusercontent.com \
+    github-registry-files.githubusercontent.com \
+    .actions.githubusercontent.com \
+    .pkg.github.com \
+    pkg-containers.githubusercontent.com \
+    github-cloud.githubusercontent.com \
+    github-cloud.s3.amazonaws.com \
+    dependabot-actions.githubapp.com \
+    release-assets.githubusercontent.com \
+    api.snapcraft.io
 
 http_access allow localnet github_domains
 http_access deny all

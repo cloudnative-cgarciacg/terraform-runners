@@ -15,10 +15,6 @@ provider "google" {
   zone    = var.zone
 }
 
-# -----------------------------
-# Networking
-# -----------------------------
-
 resource "google_compute_network" "vpc" {
   name                    = "github-runner-vpc"
   auto_create_subnetworks = false
@@ -32,7 +28,6 @@ resource "google_compute_subnetwork" "subnet" {
   private_ip_google_access = true
 }
 
-# Cloud Router + NAT para salida a internet SIN IP pública en la VM
 resource "google_compute_router" "router" {
   name    = "github-runner-router"
   region  = var.region
@@ -52,18 +47,10 @@ resource "google_compute_router_nat" "nat" {
   }
 }
 
-# -----------------------------
-# Service Account
-# -----------------------------
-
 resource "google_service_account" "runner_sa" {
   account_id   = "github-runner-sa"
   display_name = "Service account for GitHub Actions runner"
 }
-
-# -----------------------------
-# VM para el runner
-# -----------------------------
 
 data "google_compute_image" "ubuntu" {
   family  = "ubuntu-2204-lts"
@@ -85,7 +72,6 @@ resource "google_compute_instance" "runner" {
     }
   }
 
-  # Sin IP pública
   network_interface {
     subnetwork = google_compute_subnetwork.subnet.id
   }
@@ -99,20 +85,13 @@ resource "google_compute_instance" "runner" {
   }
 
   metadata_startup_script = templatefile("${path.module}/startup.sh.tpl", {
-  github_url     = var.github_url
-  github_token   = var.github_token
-  runner_version = var.runner_version
-  runner_labels  = var.runner_labels
+    github_url     = var.github_url
+    github_token   = var.github_token
+    runner_version = var.runner_version
+    runner_labels  = var.runner_labels
   })
-
-
 }
 
-# -----------------------------
-# Firewall rules
-# -----------------------------
-
-# SSH vía IAP (opcional pero útil)
 resource "google_compute_firewall" "iap_ssh" {
   name      = "github-runner-iap-ssh"
   network   = google_compute_network.vpc.id
@@ -125,10 +104,8 @@ resource "google_compute_firewall" "iap_ssh" {
 
   source_ranges = ["35.235.240.0/20"]
   target_tags   = ["github-runner"]
-  description   = "Allow SSH over IAP to runner VM"
 }
 
-# Permitir solo EGRESO TCP 443 desde el runner
 resource "google_compute_firewall" "runner_allow_https" {
   name      = "github-runner-allow-https"
   network   = google_compute_network.vpc.id
@@ -142,10 +119,8 @@ resource "google_compute_firewall" "runner_allow_https" {
 
   destination_ranges = ["0.0.0.0/0"]
   target_tags        = ["github-runner"]
-  description        = "Allow runner to access internet only over HTTPS"
 }
 
-# Denegar TODO el resto de egreso desde el runner
 resource "google_compute_firewall" "runner_deny_all_egress" {
   name      = "github-runner-deny-all-egress"
   network   = google_compute_network.vpc.id
@@ -158,5 +133,4 @@ resource "google_compute_firewall" "runner_deny_all_egress" {
 
   destination_ranges = ["0.0.0.0/0"]
   target_tags        = ["github-runner"]
-  description        = "Deny any other egress traffic from runner"
 }

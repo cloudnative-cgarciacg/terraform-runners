@@ -9,24 +9,23 @@ GITHUB_TOKEN="${github_token}"
 apt-get update -y
 apt-get install -y curl tar
 
-useradd -m -d /home/github-runner -s /bin/bash github-runner || true
+mkdir -p /opt/actions-runner
+cd /opt/actions-runner
 
-sudo -u github-runner bash -lc "
-  mkdir -p ~/actions-runner
-  cd ~/actions-runner
+curl -Ls -o actions-runner.tar.gz \
+  "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
 
-  curl -Ls -o actions-runner.tar.gz \
-    \"https://github.com/actions/runner/releases/download/v${runner_version}/actions-runner-linux-x64-${runner_version}.tar.gz\"
+tar xzf actions-runner.tar.gz
 
-  tar xzf actions-runner.tar.gz
+# Necesario para ejecutar como root
+export RUNNER_ALLOW_RUNASROOT=1
 
-  ./config.sh --unattended \
-    --url \"${GITHUB_URL}\" \
-    --token \"${GITHUB_TOKEN}\" \
-    --labels \"${RUNNER_LABELS}\" \
-    --name \"gcp-\$(hostname)\" \
-    --work \"_work\"
+./config.sh --unattended \
+  --url "${GITHUB_URL}" \
+  --token "${GITHUB_TOKEN}" \
+  --labels "${RUNNER_LABELS}" \
+  --name "gcp-$(hostname)" \
+  --work "_work"
 
-  ./svc.sh install
-  ./svc.sh start
-"
+./svc.sh install
+./svc.sh start
